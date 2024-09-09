@@ -54,6 +54,11 @@ def make_parser():
         action="store_true",
         help="decode in inference or not"
     )
+    parser.add_argument(
+        "--attach_nms",
+        action="store_true",
+        help="whether to attach ONNX NMS operator"
+    )
 
     return parser
 
@@ -87,8 +92,9 @@ def main():
 
     logger.info("loading checkpoint done.")
     dummy_input = torch.randn(args.batch_size, 3, exp.test_size[0], exp.test_size[1])
+    model(dummy_input)
 
-    torch.onnx._export(
+    onnx_model = torch.onnx._export(
         model,
         dummy_input,
         args.output_name,
@@ -108,6 +114,60 @@ def main():
         onnx_model = onnx.load(args.output_name)
         model_simp, check = simplify(onnx_model)
         assert check, "Simplified ONNX model could not be validated"
+        # attach NMS
+        if args.attach_nms:
+            max_detections = 200
+            score_thresh = 0.95
+            iou_thresh = 0.5
+
+            # make constant tensors
+            score_threshold = onnx.helper.make_tensor(
+                'score_threshold',
+                onnx.TensorProto.FLOAT,
+                [1],
+                [score_thresh])
+
+            iou_threshold = onnx.helper.make_tensor(
+                'iou_threshold',
+                onnx.TensorProto.FLOAT,
+                [1],
+                [iou_thresh])
+
+            max_output_boxes_per_class = onnx.helper.make_tensor(
+                'max_output_boxes_per_class',
+                onnx.TensorProto.INT64,
+                [1],
+                [max_detections])
+            
+            inputs_nms=['output', '979', 'max_output_boxes_per_class',
+                        'iou_threshold', 'score_threshold']
+            outputs_nms = ['num_selected_indices']
+
+            nms_node = onnx.helper.make_node(
+                'NonMaxSuppression',
+                inputs_nms,
+                outputs_nms,
+                center_point_box=0, 
+            )
+
+            # add to the list of graph nodes
+            model_simp.graph.node.append(nms_node)
+
+            # initializer 
+            model_simp.graph.initializer.append(score_threshold)
+            model_simp.graph.initializer.append(iou_threshold)
+            model_simp.graph.initializer.append(max_output_boxes_per_class)
+
+            # define output
+            output_nms_value_info = onnx.helper.make_tensor_value_info(
+                'num_selected_indices', 
+                onnx.TensorProto.INT64, 
+                shape=['num_selected_indices', 3])
+
+            # add to graph, first remove existing output nodes
+            while model_simp.graph.output:
+                model_simp.graph.output.pop()
+            model_simp.graph.output.append(output_nms_value_info)
         onnx.save(model_simp, args.output_name)
         logger.info("generated simplified onnx model named {}".format(args.output_name))
 

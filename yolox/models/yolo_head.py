@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from yolox.utils import bboxes_iou, cxcywh2xyxy, meshgrid, visualize_assign
+from yolox.utils import bboxes_iou, cxcywh2xyxy, meshgrid, visualize_assign, inline_nms
 
 from .losses import IOUloss
 from .network_blocks import BaseConv, DWConv
@@ -250,7 +250,17 @@ class YOLOXHead(nn.Module):
             torch.exp(outputs[..., 2:4]) * strides,
             outputs[..., 4:]
         ], dim=-1)
-        return outputs
+        
+        boxes = outputs[..., :4]
+        scores = outputs[..., 4:5] * outputs[..., 5:]
+
+        boxes_xyxy = boxes.clone()
+        boxes_xyxy[..., 0] = boxes[..., 0] - boxes[..., 2] / 2.0
+        boxes_xyxy[..., 1] = boxes[..., 1] - boxes[..., 3] / 2.0
+        boxes_xyxy[..., 2] = boxes[..., 0] + boxes[..., 2] / 2.0
+        boxes_xyxy[..., 3] = boxes[..., 1] + boxes[..., 3] / 2.0
+
+        return boxes_xyxy, scores
 
     def get_losses(
         self,

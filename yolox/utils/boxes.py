@@ -8,6 +8,7 @@ import torchvision
 
 __all__ = [
     "filter_box",
+    "inline_nms",
     "postprocess",
     "bboxes_iou",
     "matrix_iou",
@@ -27,6 +28,37 @@ def filter_box(output, scale_range):
     h = output[:, 3] - output[:, 1]
     keep = (w * h > min_scale * min_scale) & (w * h < max_scale * max_scale)
     return output[keep]
+
+
+def inline_nms(boxes_xyxy, scores, conf_thre=0.7, nms_thre=0.45, class_agnostic=False):
+    assert len(boxes_xyxy) == len(scores)
+    output = [None for _ in range(len(boxes_xyxy))]
+    for i, (batch_boxes, batch_scores) in enumerate(zip(boxes_xyxy, scores)):
+        conf_mask = torch.where(batch_scores >= conf_thre)
+        batch_boxes = batch_boxes[conf_mask]
+        batch_scores = batch_scores[conf_mask]
+
+        if class_agnostic:
+            nms_out_index = torchvision.ops.nms(
+                batch_boxes,
+                batch_scores,
+                nms_thre,
+            )
+        else:
+            nms_out_index = torchvision.ops.batched_nms(
+                detections[:, :4],
+                detections[:, 4] * detections[:, 5],
+                detections[:, 6],
+                nms_thre,
+            )
+
+        detections = detections[nms_out_index]
+        if output[i] is None:
+            output[i] = detections
+        else:
+            output[i] = torch.cat((output[i], detections))
+
+    return output
 
 
 def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45, class_agnostic=False):
