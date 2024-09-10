@@ -147,6 +147,7 @@ def main():
                 'NonMaxSuppression',
                 inputs_nms,
                 outputs_nms,
+                name="/NonMaxSuppression",
                 center_point_box=0, 
             )
 

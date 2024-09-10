@@ -127,6 +127,8 @@ class YOLOXHead(nn.Module):
         self.iou_loss = IOUloss(reduction="none")
         self.strides = strides
         self.grids = [torch.zeros(1)] * len(in_channels)
+        self.convert_matrix = torch.tensor([[1, 0, 1, 0], [0, 1, 0, 1], [-0.5, 0, 0.5, 0], [0, -0.5, 0, 0.5]],
+                                           dtype=torch.float32)
 
     def initialize_biases(self, prior_prob):
         for conv in self.cls_preds:
@@ -251,14 +253,10 @@ class YOLOXHead(nn.Module):
             outputs[..., 4:]
         ], dim=-1)
         
-        boxes = outputs[..., :4]
+        boxes_xyxy = outputs[..., :4]
         scores = outputs[..., 4:5] * outputs[..., 5:]
 
-        boxes_xyxy = boxes.clone()
-        boxes_xyxy[..., 0] = boxes[..., 0] - boxes[..., 2] / 2.0
-        boxes_xyxy[..., 1] = boxes[..., 1] - boxes[..., 3] / 2.0
-        boxes_xyxy[..., 2] = boxes[..., 0] + boxes[..., 2] / 2.0
-        boxes_xyxy[..., 3] = boxes[..., 1] + boxes[..., 3] / 2.0
+        boxes_xyxy @= self.convert_matrix
 
         return boxes_xyxy, scores
 
